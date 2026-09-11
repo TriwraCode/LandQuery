@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>花蓮馬太鞍溪堰塞湖重災區造林範圍地籍位置查詢</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #f4f7f6; }
+        header { background: #2c3e50; color: white; padding: 15px; text-align: center; }
+        .container { display: flex; flex: 1; overflow: hidden; }
+        #sidebar { width: 330px; padding: 20px; border-right: 1px solid #ccc; background: white; z-index: 1000; overflow-y: auto; }
+        #map { flex: 1; background: #ddd; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; font-weight: bold; margin-bottom: 8px; color: #34495e; }
+        select, input { width: 100%; padding: 10px; border: 1px solid #bdc3c7; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 15px; background: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        #status-light { font-size: 12px; margin-bottom: 10px; padding: 10px; border-radius: 4px; background: #eee; color: #666; border: 1px solid #ddd; }
+        .info-box { margin-top: 20px; padding: 15px; border-radius: 5px; display: none; line-height: 1.8; font-size: 14px; }
+        .danger { background: #fff5f5; border: 1px solid #e74c3c; color: #c0392b; }
+        .safe { background: #f4fff4; border: 1px solid #27ae60; color: #27ae60; }
+		/* --- [新增：圖例樣式] --- */
+        .legend {
+            background: white;
+            padding: 12px;
+            line-height: 22px;
+            color: #333;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            font-size: 13px;
+        }
+        .legend i {
+            width: 20px;
+            height: 20px;
+            float: left;
+            margin-right: 10px;
+            opacity: 0.8;
+            border-radius: 2px;
+        }
+        /* 圖例裡的格線圖示模擬 */
+        .river-legend-icon {
+            border: 6px solid #008AEC;
+            background-color: rgba(107, 185, 236, 0.4);
+        }
+		/* 側邊欄聯絡資訊區塊 */
+		.sidebar-contact {
+ 		   margin-top: 30px;
+ 		   padding: 15px;
+  		  border-top: 2px solid #eee;
+ 		   font-size: 13px;
+  		  color: #555;
+  		  line-height: 1.6;
+		}
+		.sidebar-contact b {
+  		  display: block;
+  		  color: #2c3e50;
+   		 margin-bottom: 5px;
+		}
+		
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>花蓮馬太鞍溪堰塞湖災後重災區及受災嚴重地區之地籍位置查詢</h1>
+    <div style="font-size: 20px; margin-top: 5px; color: #ecf0f1; opacity: 0.9;">
+        查詢資料係以土砂平均埋沒厚度50公分以上
+    </div>
+</header>
+<div class="container">
+    <div id="sidebar">
+        <div id="status-light">正在初始化系統...</div>
+        
+        <div class="input-group">
+            <label>1. 選擇地段：</label>
+            <select id="sectionSelect"><option value="">-- 等待資料載入 --</option></select>
+        </div>
+        
+        <div class="input-group">
+            <label>2. 輸入地號：</label>
+            <div style="display:flex; gap:5px; align-items:center;">
+                <input type="text" id="numMain" placeholder="正號(如175)" maxlength="4">
+                <span>-</span>
+                <input type="text" id="numSub" placeholder="副號" maxlength="4" value="0">
+            </div>
+        </div>
+        
+        <button id="searchBtn">立即查詢</button>
+        <div id="infoBox" class="info-box"></div>
+		<div class="sidebar-contact">
+        <b>行政院光復工作站聯絡電話</b>
+        03-8700305   、   03-8700309<br>
+        03-8700318   、   03-8700319<br>
+        03-8700296<br>
+    </div>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // --- 1. 地圖初始化 ---
+    var map = L.map('map').setView([23.673, 121.423], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    var disasterData = [];
+	var geojsonLayer; // 地籍圖層
+    var riverLayer;   // 河川圖層 (新增)
+    var highlightLayer;
+
+    // --- 2. 查詢比對功能 ---
+    function performSearch() {
+        const sectCode = document.getElementById('sectionSelect').value;
+        const main = document.getElementById('numMain').value.trim();
+        const sub = document.getElementById('numSub').value.trim() || "0";
+        const infoBox = document.getElementById('infoBox');
+
+        if (!sectCode || !main) { alert("請填寫地段與地號"); return; }
+
+        const target14 = sectCode + main.padStart(4, '0') + sub.padStart(4, '0');
+        
+        // 安全尋找 match，避免欄位不存在導致報錯
+        const match = disasterData.find(d => {
+            const dNum = d.NUMBER ? d.NUMBER.toString().padStart(8, '0') : "";
+            return (d.sect_code + dNum) === target14;
+        });
+
+        infoBox.style.display = 'block';
+        if (match) {
+            infoBox.className = "info-box danger";
+            // 使用安全取值方式：match["欄位名稱"]
+            infoBox.innerHTML = `
+                <b>⚠️ 查獲受災紀錄</b><hr>
+                <b>段號：</b>${target14}<br>
+                <b>位置：</b>${match["位置"] || "見清冊"}<br>
+                <b>使用分區：</b>${match["使用分區"] || "位於都市計畫區"}<br>
+                <b>使用類別：</b>${match["使用類別"] || "位於都市計畫區"}<br>
+				<b>土地權屬：</b>${match["所有人"] }<br>
+				<b>公有土地管理機關：</b>${match["公有土地管理機關"] || "無"}<br>
+				<b>位於河川治理用地範圍內：</b>${match["位於河川治理用地範圍內"] || "無"}<br>
+				<b>是否符合造林補助資格：</b>${match["是否符合造林補助資格"]}<br>
+				
+            `;
+        } else {
+            infoBox.className = "info-box safe";
+            infoBox.innerHTML = `<b>✅ 該地號不在目前受災清冊內</b><br>查詢段號：${target14}`;
+        }
+        
+        showOnMap(target14);
+    }
+
+    // --- 3. 定位功能 ---
+    function showOnMap(target14) {
+        if (highlightLayer) map.removeLayer(highlightLayer);
+        if (!geojsonLayer) return;
+
+        let found = false;
+        geojsonLayer.eachLayer(layer => {
+            const p = layer.feature.properties;
+            const mapID = p.段號 || (p.sect_code + (p.NUMBER||"").toString().padStart(8, '0'));
+
+            if (mapID === target14) {
+                highlightLayer = L.geoJSON(layer.feature, {
+                    style: { color: 'red', weight: 6, fillOpacity: 0.6 }
+                }).addTo(map);
+                map.flyToBounds(highlightLayer.getBounds(), { padding: [50, 50], maxZoom: 18 });
+                found = true;
+            }
+        });
+    }
+
+    // --- 4. 系統初始化 (載入 JSON) ---
+    async function setup() {
+        const status = document.getElementById('status-light');
+        
+        // A. 載入清冊
+        try {
+            console.log("嘗試讀取 list.json...");
+            const res = await fetch('list.json');
+            if (!res.ok) throw new Error("連線失敗 (404)，請檢查 GitHub 上是否有 list.json 檔案");
+            
+            disasterData = await res.json();
+            console.log("清冊載入成功:", disasterData);
+
+            const select = document.getElementById('sectionSelect');
+            const sections = {};
+            disasterData.forEach(item => {
+                if(item.SECTION && item.sect_code) sections[item.SECTION] = item.sect_code;
+            });
+            
+            select.innerHTML = '<option value="">-- 請選擇地段 --</option>';
+            Object.keys(sections).sort().forEach(name => {
+                let opt = document.createElement('option');
+                opt.value = sections[name];
+                opt.innerText = name;
+                select.appendChild(opt);
+            });
+            status.innerHTML = "✅ 清冊載入成功 (共 " + disasterData.length + " 筆)";
+			status.innerHTML = "清冊來源：農田水利署截至115.4.17前提供資料";
+            status.style.color = "green";
+        } catch (e) {
+            console.error(e);
+            status.innerHTML = "❌ 清冊失敗: " + e.message;
+            status.style.color = "red";
+        }
+
+        // B. 載入地圖
+        fetch('map.geojson')
+            .then(res => res.json())
+            .then(data => {
+                geojsonLayer = L.geoJSON(data, {
+                    style: { color: "#333", weight: 0.5, fillOpacity: 0.1 }
+                }).addTo(map);
+            }).catch(err => {
+                status.innerHTML += " | ❌ 地圖失敗";
+            });
+			
+		// C. 載入河川治理範圍 (river_boundary.geojson)
+        fetch('river_boundary.geojson')
+            .then(res => res.json())
+            .then(data => {
+                riverLayer = L.geoJSON(data, {
+                    style: { 
+                        color: "#008AEC", // **藍色粗外框**
+                        weight: 5,        // **粗度 5**
+                        opacity: 1,       // 外框不透明
+                        fillColor: "#6BB9EC", // 內部填充藍色
+                        fillOpacity: 0.15  // **淡藍色半透明 (替代格線)**
+                    }
+                }).addTo(map);
+            
+                // 將河川圖層推到最底層，避免遮擋高亮地塊
+                riverLayer.bringToBack();
+                console.log("河川範圍載入成功");
+            })
+            .catch(err => {
+                console.warn("未找到河川範圍圖資 (river_boundary.geojson)");
+            });
+		// 4. 添加圖例
+        const legend = L.control({position: 'bottomright'});
+        legend.onAdd = function () {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = `
+                <b style="font-size:14px; color:#2c3e50;">地圖圖例</b><hr style="margin:5px 0;">
+                <div style="display:flex; align-items:center; margin-bottom:5px;">
+                    <i class="river-legend-icon"></i> 
+                    <span>河川治理用地範圍</span>
+                </div>
+                <div style="display:flex; align-items:center;">
+                    <i style="background: rgba(255, 0, 0, 0.6); border: 2px solid red;"></i> 
+                    <span>受災土地 (查詢結果)</span>
+                </div>
+            `;
+            return div;
+        };
+        legend.addTo(map);
+    }
+
+    window.onload = setup;
+    document.getElementById('searchBtn').onclick = performSearch;
+</script>
+</body>
+</html>
